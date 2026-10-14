@@ -1,0 +1,77 @@
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-simpledrive}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-simpledrive}
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    mem_limit: 2g
+    security_opt: ["no-new-privileges:true"]
+  app:
+    build: { context: ., target: app }
+    restart: unless-stopped
+    stop_grace_period: 60s
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      HOST: 0.0.0.0
+      PORT: 4000
+      BASE_URL: ${BASE_URL:?Set BASE_URL}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-simpledrive}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-simpledrive}
+      SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET}
+      DATA_DIR: /data/files
+      ADMIN_EMAIL: ${ADMIN_EMAIL:?Set ADMIN_EMAIL}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      MAX_FILE_BYTES: 2000000000
+      USER_QUOTA_BYTES: ${USER_QUOTA_BYTES:-20000000000}
+      GLOBAL_QUOTA_BYTES: ${GLOBAL_QUOTA_BYTES:-100000000000}
+      MIN_FREE_BYTES: ${MIN_FREE_BYTES:-20000000000}
+      RETENTION_HOURS: 72
+      UPLOAD_IDLE_HOURS: 24
+      IMPORT_CONCURRENCY: 2
+      NGINX_DOWNLOADS: "true"
+      GOOGLE_DRIVE_API_KEY: ${GOOGLE_DRIVE_API_KEY:-}
+    volumes:
+      - files:/data/files
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    mem_limit: 4g
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+  web:
+    build: { context: ., target: web }
+    restart: unless-stopped
+    depends_on:
+      app: { condition: service_healthy }
+    environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN}
+      NGINX_ENVSUBST_FILTER: DOMAIN
+    ports: ["80:80", "443:443"]
+    volumes:
+      - files:/data/files:ro
+      - certificates:/etc/letsencrypt:ro
+      - acme:/var/www/certbot:ro
+    mem_limit: 512m
+    security_opt: ["no-new-privileges:true"]
+  certbot:
+    image: certbot/certbot:latest
+    profiles: ["tools"]
+    volumes:
+      - certificates:/etc/letsencrypt
+      - acme:/var/www/certbot
+volumes:
+  postgres:
+  files:
+  certificates:
+  acme:
