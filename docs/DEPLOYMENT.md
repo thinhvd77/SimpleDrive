@@ -31,8 +31,8 @@ POSTGRES_USER=simpledrive
 POSTGRES_DB=simpledrive
 POSTGRES_PASSWORD=<chuoi-hex-ngau-nhien>
 SESSION_SECRET=<chuoi-hex-ngau-nhien-khac>
-ADMIN_EMAIL=admin@congty.vn
-ADMIN_PASSWORD=<mat-khau-manh-it-nhat-12-ky-tu>
+ADMIN_EMPLOYEE_CODE=ADMIN
+ADMIN_PASSWORD=<mat-khau-manh-it-nhat-8-ky-tu>
 USER_QUOTA_BYTES=20000000000
 GLOBAL_QUOTA_BYTES=100000000000
 MIN_FREE_BYTES=20000000000
@@ -63,6 +63,8 @@ docker compose up -d app
 ```
 
 Database giữ mật khẩu đã băm; bỏ biến bootstrap không xóa hoặc đổi tài khoản. Không thay `SESSION_SECRET` tùy tiện: URL nguồn đang chờ tải được mã hóa bằng secret này. Nếu cần thay, chờ/xóa các tác vụ nhập link đang chờ trước.
+
+Đăng nhập bằng mã nhân viên `ADMIN` hoặc mã trong `ADMIN_EMPLOYEE_CODE`, cùng mật khẩu quản trị đã đặt. Không dùng email đăng nhập. Cấu hình cũ `ADMIN_EMAIL` không còn dùng. Khi nâng cấp database cũ, migration tự thêm mã nhân viên và giữ nguyên UUID, mật khẩu, quyền, file và phiên đăng nhập; admin có thể chỉnh lại mã ở trang **Tài khoản**. Thay `ADMIN_EMPLOYEE_CODE` sau khi đã có mã trong database không tự đổi mã hiện tại; hãy dùng nút **Đổi mã**.
 
 ## 4. Bật nhập Google Drive công khai
 

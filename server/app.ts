@@ -15,12 +15,13 @@ import { HttpError, authenticate, assertOrigin, hashPassword, checkPassword, csr
 import { initializeStorage, ownedFile, reserveFile, publicFile, filePath, audit, validId, type FileRow } from './storage.js';
 import { parseRemoteUrl, driveReference, type OpenRemote } from './remote.js';
 import { Worker } from './worker.js';
+import { employeeCodeSchema } from './employee-code.js';
 
-const loginSchema = z.object({ email: z.email().max(254), password: z.string().min(1).max(256) });
-const passwordSchema = z.string().min(12, 'Mật khẩu cần ít nhất 12 ký tự.').max(256);
-const userSchema = z.object({ email: z.email().max(254), name: z.string().trim().min(1).max(100), password: passwordSchema, quota: z.number().int().positive().optional() });
-const userUpdate = z.object({ disabled: z.boolean().optional(), password: passwordSchema.optional(), quota: z.number().int().positive().optional() });
-const summary = (u: User) => ({ id: u.id, email: u.email, name: u.name, role: u.role, quota: Number(u.quota_bytes), disabled: u.disabled });
+const loginSchema = z.object({ employeeCode: employeeCodeSchema, password: z.string().min(1).max(256) });
+const passwordSchema = z.string().min(8, 'Mật khẩu cần ít nhất 8 ký tự.').max(256);
+const userSchema = z.object({ employeeCode: employeeCodeSchema, name: z.string().trim().min(1).max(100), password: passwordSchema, quota: z.number().int().positive().optional() });
+const userUpdate = z.object({ employeeCode: employeeCodeSchema.optional(), disabled: z.boolean().optional(), password: passwordSchema.optional(), quota: z.number().int().positive().optional() });
+const summary = (u: User) => ({ id: u.id, employeeCode: u.employee_code, name: u.name, role: u.role, quota: Number(u.quota_bytes), disabled: u.disabled });
 export async function createApp(db: Database, config: Config, options: { worker?: boolean; open?: OpenRemote; logger?: boolean } = {}) {
   await initializeStorage(config);
   const app = Fastify({ logger: options.logger ? { redact: ['req.headers.cookie', 'req.headers.authorization', 'req.headers["x-csrf-token"]'] } : false, bodyLimit: 32 * 1024, requestTimeout: 120_000, trustProxy: config.NGINX_DOWNLOADS === 'true' ? (_address, hop) => hop === 0 : false });
@@ -51,12 +52,12 @@ export async function createApp(db: Database, config: Config, options: { worker?
   app.post('/api/auth/login', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req, reply) => {
     assertOrigin(req, config);
     const input = loginSchema.parse(req.body);
-    const row = await db.query<User & { password_hash: string }>('SELECT * FROM users WHERE email=$1', [input.email.toLowerCase()]);
+    const row = await db.query<User & { password_hash: string }>('SELECT * FROM users WHERE employee_code=$1', [input.employeeCode]);
     const u = row.rows[0];
     // Spend the same KDF effort for unknown accounts to reduce account enumeration.
     const dummy = '00000000000000000000000000000000:' + '00'.repeat(64);
     const correct = await checkPassword(input.password, u?.password_hash ?? dummy);
-    if (!u || u.disabled || !correct) throw new HttpError(401, 'Email hoặc mật khẩu không đúng.');
+    if (!u || u.disabled || !correct) throw new HttpError(401, 'Mã nhân viên hoặc mật khẩu không đúng.');
     const token = randomBytes(32).toString('hex');
     await db.query(`INSERT INTO sessions(token_hash,user_id,expires_at) VALUES($1,$2,now()+interval '24 hours')`, [tokenHash(token), u.id]);
     reply.setCookie('sd_session', token, { path: '/', httpOnly: true, sameSite: 'strict', secure: config.secureCookies, maxAge: 86400 });
@@ -138,15 +139,15 @@ export async function createApp(db: Database, config: Config, options: { worker?
 
   app.get('/api/admin/users', async req => {
     await admin(req);
-    const rows = await db.query<User & { used: string }>(`SELECT u.id,u.email,u.name,u.role,u.disabled,u.quota_bytes,COALESCE(sum(f.reserved_bytes),0) AS used
+    const rows = await db.query<User & { used: string }>(`SELECT u.id,u.employee_code,u.name,u.role,u.disabled,u.quota_bytes,COALESCE(sum(f.reserved_bytes),0) AS used
       FROM users u LEFT JOIN files f ON f.owner_id=u.id GROUP BY u.id ORDER BY u.created_at`);
     return { users: rows.rows.map(u => ({ ...summary(u), used: Number(u.used) })) };
   });
   app.post('/api/admin/users', async (req, reply) => {
     const a = await admin(req, true); const input = userSchema.parse(req.body);
     const hash = await hashPassword(input.password); const id = randomUUID();
-    try { await db.transaction(async tx => { await tx.query(`INSERT INTO users(id,email,name,password_hash,role,quota_bytes) VALUES($1,$2,$3,$4,'employee',$5)`, [id, input.email.toLowerCase(), input.name, hash, input.quota ?? config.USER_QUOTA_BYTES]); await audit(tx, a.id, 'user_created', undefined, input.email.toLowerCase()); }); }
-    catch (e) { if ((e as { code?: string }).code === '23505') throw new HttpError(409, 'Email đã được sử dụng.'); throw e; }
+    try { await db.transaction(async tx => { await tx.query(`INSERT INTO users(id,employee_code,name,password_hash,role,quota_bytes) VALUES($1,$2,$3,$4,'employee',$5)`, [id, input.employeeCode, input.name, hash, input.quota ?? config.USER_QUOTA_BYTES]); await audit(tx, a.id, 'user_created', undefined, input.employeeCode); }); }
+    catch (e) { if ((e as { code?: string }).code === '23505') throw new HttpError(409, 'Mã nhân viên đã được sử dụng.'); throw e; }
     return reply.code(201).send({ id });
   });
   app.patch<{ Params: { id: string } }>('/api/admin/users/:id', async req => {
@@ -154,17 +155,17 @@ export async function createApp(db: Database, config: Config, options: { worker?
     if (!validId(req.params.id)) throw new HttpError(404, 'Không tìm thấy tài khoản.');
     if (req.params.id === a.id && input.disabled) throw new HttpError(400, 'Không thể tự khóa tài khoản quản trị.');
     const hash = input.password ? await hashPassword(input.password) : null;
-    await db.transaction(async tx => {
-      const row = await tx.query(`UPDATE users SET disabled=COALESCE($2,disabled),password_hash=COALESCE($3,password_hash),quota_bytes=COALESCE($4,quota_bytes) WHERE id=$1 RETURNING id`, [req.params.id, input.disabled ?? null, hash, input.quota ?? null]);
+    try { await db.transaction(async tx => {
+      const row = await tx.query(`UPDATE users SET disabled=COALESCE($2,disabled),password_hash=COALESCE($3,password_hash),quota_bytes=COALESCE($4,quota_bytes),employee_code=COALESCE($5,employee_code) WHERE id=$1 RETURNING id`, [req.params.id, input.disabled ?? null, hash, input.quota ?? null, input.employeeCode ?? null]);
       if (!row.rows.length) throw new HttpError(404, 'Không tìm thấy tài khoản.');
       if (hash || input.disabled) await tx.query('DELETE FROM sessions WHERE user_id=$1', [req.params.id]);
       await audit(tx, a.id, 'user_updated', undefined, req.params.id);
-    });
+    }); } catch (e) { if ((e as { code?: string }).code === '23505') throw new HttpError(409, 'Mã nhân viên đã được sử dụng.'); throw e; }
     return { ok: true };
   });
   app.get('/api/admin/audit', async req => {
     await admin(req);
-    const rows = await db.query(`SELECT a.id,a.action,a.file_id,a.detail,a.created_at,u.email FROM audit a LEFT JOIN users u ON u.id=a.user_id ORDER BY a.id DESC LIMIT 200`);
+    const rows = await db.query(`SELECT a.id,a.action,a.file_id,a.detail,a.created_at,u.employee_code AS "employeeCode" FROM audit a LEFT JOIN users u ON u.id=a.user_id ORDER BY a.id DESC LIMIT 200`);
     return { events: rows.rows };
   });
   app.get('/api/admin/storage', async req => {

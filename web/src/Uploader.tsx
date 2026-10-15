@@ -16,7 +16,7 @@ export function Uploader({ session, onComplete, onError }: { session: Session; o
     const uppy = new Uppy({ id: `simpledrive-${session.user.id}`, autoProceed: false,
       restrictions: { maxFileSize: session.limits.maxFileBytes, minFileSize: 1, maxNumberOfFiles: 5 },
       locale: Vietnamese,
-    }).use(Dashboard, { target: target.current, inline: true, height: 280, proudlyDisplayPoweredByUppy: false,
+    }).use(Dashboard, { target: target.current, inline: true, height: 200, proudlyDisplayPoweredByUppy: false,
       hideProgressDetails: false, note: 'Tối đa 2 GB/file · Có thể tiếp tục khi mất mạng',
       locale: { strings: {
         dropPasteFiles: 'Kéo thả file vào đây hoặc %{browseFiles}', browseFiles: 'chọn từ máy tính',

@@ -7,10 +7,12 @@ test('Vietnamese UI: login, upload, ready state, download, delete, navigation an
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Chào mừng trở lại' })).toBeVisible();
   await page.screenshot({ path: info.outputPath('login-desktop.png'), fullPage: true });
-  await page.getByLabel('Email công ty').fill(access.email); await page.getByLabel('Mật khẩu', { exact: true }).fill(access.password);
+  await page.getByLabel('Mã nhân viên', { exact: true }).fill(access.employeeCode); await page.getByLabel('Mật khẩu', { exact: true }).fill(access.password);
   await page.getByRole('button', { name: 'Đăng nhập', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'File của tôi', exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Thêm file vào trạm' })).toBeVisible();
+  await expect(page.locator('.uppy-Dashboard-browse')).toBeVisible();
+  await page.screenshot({ path: info.outputPath('upload-desktop.png') });
   const name = `kiem-thu-${Date.now()}.txt`;
   await page.locator('input[type=file]').first().setInputFiles({ name, mimeType: 'text/plain', buffer: Buffer.from('SimpleDrive UI end-to-end test') });
   await page.getByRole('button', { name: 'Upload 1 file', exact: true }).click();
@@ -19,10 +21,45 @@ test('Vietnamese UI: login, upload, ready state, download, delete, navigation an
   const [download] = await Promise.all([page.waitForEvent('download'), row.getByRole('link', { name: `Tải ${name}` }).click()]);
   expect(download.suggestedFilename()).toBe(name);
   const downloaded = await download.path(); expect((await readFile(downloaded!)).toString()).toBe('SimpleDrive UI end-to-end test');
+  await expect(page.locator('.alert.success')).not.toBeVisible({ timeout: 8000 });
   await page.evaluate(() => window.scrollTo(0, 0));
+  await expect(page.locator('.brand-mark')).toHaveCSS('background-color', 'rgb(174, 28, 63)');
   await page.screenshot({ path: info.outputPath('dashboard-desktop.png'), fullPage: true });
+  for (const width of [360, 375, 390, 768, 1024, 1600]) {
+    await page.setViewportSize({ width, height: width < 768 ? 812 : 900 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), `No overflow at ${width}px`).toBe(true);
+    await expect(page.getByRole('navigation', { name: 'Điều hướng chính' })).toBeVisible();
+    if (width < 768) {
+      const navBox = await page.getByRole('navigation').boundingBox();
+      expect(navBox!.y + navBox!.height).toBe(812);
+      expect((await page.getByRole('button', { name: 'File của tôi', exact: true }).boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    }
+  }
+  await page.setViewportSize({ width: 1600, height: 900 });
   await page.getByRole('button', { name: 'Nhập từ link', exact: true }).click(); await expect(page.getByLabel('Link của file')).toBeVisible();
+  await page.screenshot({ path: info.outputPath('import-desktop.png'), fullPage: true });
+  await page.setViewportSize({ width: 375, height: 812 });
+  await expect(page.getByLabel('Link của file')).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.screenshot({ path: info.outputPath('import-mobile.png'), fullPage: true });
+  await page.setViewportSize({ width: 1600, height: 900 });
   await page.getByRole('button', { name: 'Tài khoản', exact: true }).click(); await expect(page.getByRole('heading', { name: 'Tài khoản nhân viên' })).toBeVisible();
+  const accountCode = `NVUI${Date.now()}`;
+  await page.getByLabel('Họ tên', { exact: true }).fill('Nhân viên kiểm thử UI');
+  await page.getByLabel('Mã nhân viên', { exact: true }).fill(accountCode.toLowerCase());
+  await expect(page.getByLabel('Mật khẩu ban đầu', { exact: true })).toHaveAttribute('minlength', '8');
+  await page.getByLabel('Mật khẩu ban đầu', { exact: true }).fill('UiPass12');
+  await page.getByRole('button', { name: 'Tạo tài khoản', exact: true }).click();
+  const account = page.locator('.user-row').filter({ has: page.getByText(accountCode, { exact: true }) });
+  await expect(account).toBeVisible();
+  await account.getByRole('button', { name: 'Đổi mã', exact: true }).click();
+  await page.getByLabel('Mã nhân viên mới', { exact: true }).fill(`00${accountCode}`);
+  await page.getByRole('button', { name: 'Lưu mã', exact: true }).click();
+  await expect(page.getByText(`00${accountCode}`, { exact: true })).toBeVisible();
+  await page.setViewportSize({ width: 375, height: 812 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.screenshot({ path: info.outputPath('users-mobile.png'), fullPage: true });
+  await page.setViewportSize({ width: 1600, height: 900 });
   await page.getByRole('button', { name: 'Nhật ký', exact: true }).click(); await expect(page.getByRole('heading', { name: 'Nhật ký hoạt động' })).toBeVisible();
   await page.getByRole('button', { name: 'Hướng dẫn', exact: true }).click(); await expect(page.getByRole('heading', { name: 'File đi qua trạm như thế nào?' })).toBeVisible();
   await page.getByRole('button', { name: 'File của tôi', exact: true }).click();
@@ -32,9 +69,15 @@ test('Vietnamese UI: login, upload, ready state, download, delete, navigation an
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({ path: info.outputPath('dashboard-mobile.png'), fullPage: true });
+  await page.screenshot({ path: info.outputPath('dashboard-mobile-viewport.png') });
+  await page.locator('.transfer-panel').scrollIntoViewIfNeeded();
+  await expect(page.locator('.uppy-Dashboard-browse')).toBeInViewport();
+  await page.screenshot({ path: info.outputPath('upload-mobile.png') });
   await row.getByRole('button', { name: `Xóa ${name}` }).click(); await page.getByRole('button', { name: 'Xóa file', exact: true }).click();
   await expect(page.locator('.file-name strong').filter({ hasText: name })).toHaveCount(0, { timeout: 15_000 });
   await page.getByRole('button', { name: 'Đổi mật khẩu', exact: true }).click(); await expect(page.getByRole('dialog')).toBeVisible();
+  await expect(page.getByLabel('Mật khẩu mới', { exact: true })).toHaveAttribute('minlength', '8');
+  await expect(page.getByLabel('Nhập lại mật khẩu mới', { exact: true })).toHaveAttribute('minlength', '8');
   await page.keyboard.press('Escape'); await expect(page.getByRole('dialog')).not.toBeVisible();
   expect(errors).toEqual([]);
   await page.locator('.topbar-actions').getByRole('button', { name: 'Đăng xuất', exact: true }).click();

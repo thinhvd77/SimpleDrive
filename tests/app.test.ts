@@ -9,12 +9,12 @@ test('login, CSRF, account boundaries and disabling invalidates sessions', async
   const f = await fixture();
   try {
     assert.equal((await fetch(`${f.base}/api/files`)).status, 401);
-    const auth = await f.login(); const admin = await f.login('admin@example.com');
+    const auth = await f.login(); const admin = await f.login('ADMIN');
     assert.equal((await f.send('/api/admin/users', auth)).status, 403);
     assert.equal((await fetch(`${f.base}/api/files/uploads`, { method: 'POST', headers: { Cookie: auth.cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'x', size: 1 }) })).status, 403);
     assert.equal((await f.send('/api/files/uploads', auth, { method: 'POST', headers: { Origin: 'https://evil.example' }, body: JSON.stringify({ name: 'x', size: 1 }) })).status, 403);
     const reserved = await (await f.send('/api/files/uploads', auth, { method: 'POST', body: JSON.stringify({ name: 'a.txt', size: 1 }) })).json() as any;
-    const other = await f.login('other@example.com');
+    const other = await f.login('NV002');
     assert.equal((await f.send(`/api/files/${reserved.file.id}`, other)).status, 404);
     assert.equal((await f.send(`/api/files/${reserved.file.id}/download`, other)).status, 404);
     assert.equal((await f.send(`/api/files/${reserved.file.id}`, other, { method: 'DELETE' })).status, 404);
@@ -26,7 +26,7 @@ test('login, CSRF, account boundaries and disabling invalidates sessions', async
 test('resumable upload, verification, checksum, full and ranged download, delete cleanup', async () => {
   const f = await fixture();
   try {
-    const auth = await f.login(); const other = await f.login('other@example.com');
+    const auth = await f.login(); const other = await f.login('NV002');
     const content = Buffer.from('hello simpledrive');
     const reserve = await f.send('/api/files/uploads', auth, { method: 'POST', body: JSON.stringify({ name: 'Báo cáo.txt', size: content.length }) });
     assert.equal(reserve.status, 201); const { file } = await reserve.json() as any;
@@ -93,5 +93,30 @@ test('concurrent global quota reservations stay within budget; low disk space re
     const used = await f.db.query<{ used: string }>('SELECT sum(reserved_bytes) AS used FROM files'); assert.equal(Number(used.rows[0].used), 2);
     f.config.GLOBAL_QUOTA_BYTES = 100; f.config.MIN_FREE_BYTES = Number.MAX_SAFE_INTEGER;
     assert.equal((await f.send('/api/files/uploads', auth, { method: 'POST', body: JSON.stringify({ name: 'no-disk-space.bin', size: 1 }) })).status, 507);
+  } finally { await f.close(); }
+});
+
+test('eight-character passwords work for create, reset and change; seven characters are rejected', async () => {
+  const f = await fixture();
+  try {
+    const admin = await f.login('ADMIN');
+    const create = (password: string) => f.send('/api/admin/users', admin, { method: 'POST', body: JSON.stringify({ employeeCode: 'NV008', name: 'Password boundary', password }) });
+    assert.equal((await create('Short12')).status, 400);
+    const created = await create('Start123'); assert.equal(created.status, 201);
+    const { id } = await created.json() as { id: string };
+    const login = async (password: string) => {
+      const response = await fetch(`${f.base}/api/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: f.config.BASE_URL }, body: JSON.stringify({ employeeCode: 'NV008', password }) });
+      assert.equal(response.status, 200);
+      const body = await response.json() as { csrf: string };
+      return { id, csrf: body.csrf, cookie: response.headers.get('set-cookie')!.split(';')[0] };
+    };
+    await login('Start123');
+    assert.equal((await f.send(`/api/admin/users/${id}`, admin, { method: 'PATCH', body: JSON.stringify({ password: 'Short12' }) })).status, 400);
+    assert.equal((await f.send(`/api/admin/users/${id}`, admin, { method: 'PATCH', body: JSON.stringify({ password: 'Reset123' }) })).status, 200);
+    const employee = await login('Reset123');
+    assert.equal((await f.send('/api/auth/password', employee, { method: 'POST', body: JSON.stringify({ currentPassword: 'Reset123', password: 'Short12' }) })).status, 400);
+    assert.equal((await f.send('/api/auth/password', employee, { method: 'POST', body: JSON.stringify({ currentPassword: 'Reset123', password: 'NewPass1' }) })).status, 200);
+    assert.equal((await f.send('/api/auth/me', employee)).status, 401);
+    await login('NewPass1');
   } finally { await f.close(); }
 });

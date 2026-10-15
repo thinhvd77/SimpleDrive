@@ -5,7 +5,7 @@ import type { Config } from './config.js';
 import type { FastifyRequest } from 'fastify';
 
 const scrypt = promisify(scryptCallback);
-export type User = { id: string; email: string; name: string; role: 'admin' | 'employee'; disabled: boolean; quota_bytes: string };
+export type User = { id: string; employee_code: string; name: string; role: 'admin' | 'employee'; disabled: boolean; quota_bytes: string };
 export class HttpError extends Error {
   constructor(public statusCode: number, message: string) { super(message); }
 }
@@ -24,12 +24,20 @@ export async function checkPassword(password: string, hash: string) {
 export function csrfToken(token: string, secret: string) { return createHmac('sha256', secret).update(token).digest('hex'); }
 export function assertOrigin(req: FastifyRequest, config: Config) {
   const origin = req.headers.origin;
-  if (origin && origin !== config.BASE_URL) throw new HttpError(403, 'Nguồn yêu cầu không được phép.');
+  if (!origin || origin === config.BASE_URL) return;
+  if (config.NODE_ENV === 'development') {
+    try {
+      const actual = new URL(origin), expected = new URL(config.BASE_URL);
+      const loopback = new Set(['localhost', '127.0.0.1']);
+      if (actual.origin === origin && actual.protocol === 'http:' && expected.protocol === 'http:' && actual.port === expected.port && loopback.has(actual.hostname) && loopback.has(expected.hostname)) return;
+    } catch { /* Reject malformed or unrelated origins. */ }
+  }
+  throw new HttpError(403, `Nguồn yêu cầu không được phép. Hãy mở ứng dụng tại ${config.BASE_URL}.`);
 }
 export async function authenticate(db: Database, req: FastifyRequest, config: Config, mutation = false): Promise<User> {
   const token = req.cookies.sd_session;
   if (!token) throw new HttpError(401, 'Vui lòng đăng nhập.');
-  const r = await db.query<User>(`SELECT u.id,u.email,u.name,u.role,u.disabled,u.quota_bytes FROM sessions s
+  const r = await db.query<User>(`SELECT u.id,u.employee_code,u.name,u.role,u.disabled,u.quota_bytes FROM sessions s
     JOIN users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.expires_at>now() AND NOT u.disabled`, [tokenHash(token)]);
   const user = r.rows[0];
   if (!user) throw new HttpError(401, 'Phiên đăng nhập đã hết hạn.');
@@ -42,12 +50,11 @@ export async function authenticate(db: Database, req: FastifyRequest, config: Co
   return user;
 }
 export async function bootstrapAdmin(db: Database, config: Config) {
-  if (!config.ADMIN_EMAIL || !config.ADMIN_PASSWORD) return;
-  const email = config.ADMIN_EMAIL;
+  if (!config.ADMIN_PASSWORD) return;
   const hash = await hashPassword(config.ADMIN_PASSWORD);
   await db.transaction(async tx => {
     await tx.query('SELECT id FROM capacity WHERE id=1 FOR UPDATE');
     const count = await tx.query<{ n: string }>('SELECT count(*) AS n FROM users');
-    if (Number(count.rows[0].n) === 0) await tx.query(`INSERT INTO users(id,email,name,password_hash,role,quota_bytes) VALUES($1,$2,$3,$4,'admin',$5)`, [randomUUID(), email.toLowerCase(), 'Quản trị viên', hash, config.USER_QUOTA_BYTES]);
+    if (Number(count.rows[0].n) === 0) await tx.query(`INSERT INTO users(id,employee_code,name,password_hash,role,quota_bytes) VALUES($1,$2,$3,$4,'admin',$5)`, [randomUUID(), config.ADMIN_EMPLOYEE_CODE, 'Quản trị viên', hash, config.USER_QUOTA_BYTES]);
   });
 }

@@ -4,7 +4,7 @@ Trạm trung chuyển file từ Internet vào máy nội bộ, dùng một domai
 
 ## Chức năng bản đầu
 
-- Tài khoản riêng cho nhân viên; admin tạo, khóa và đặt lại mật khẩu.
+- Đăng nhập bằng **mã nhân viên** và mật khẩu; admin tạo, đổi mã, khóa và đặt lại mật khẩu.
 - Upload tiếp tục bằng tus/Uppy, mỗi phần 16 MiB; tối đa **2 GB = 2.000.000.000 byte/file**.
 - Nhập link tải trực tiếp HTTP/HTTPS và Google Drive công khai; hai tác vụ nhập link đồng thời.
 - Kiểm tra dung lượng, hoàn tất truyền và SHA-256; đối chiếu MD5 của nguồn Google Drive khi có.
@@ -39,6 +39,22 @@ npm run dev
 ```
 
 Mở `http://localhost:5173`. `DATABASE_URL` cho phát triển phải dùng `localhost:5432`, khớp mật khẩu database. Tài khoản admin chỉ được tạo khi database chưa có người dùng; biến bootstrap không ghi đè mật khẩu đã có.
+
+Mã quản trị mặc định là `ADMIN`, cấu hình bằng `ADMIN_EMPLOYEE_CODE`. Mã nhân viên không phân biệt hoa/thường, lưu ở dạng chữ hoa, giữ số 0 ở đầu và tối đa 50 ký tự (chữ ASCII, số, `.`, `_`, `-`). Các API đăng nhập/tạo/sửa tài khoản dùng trường `employeeCode`; không dùng email để đăng nhập nữa.
+
+Database cũ tự chuyển khi khởi động: tài khoản admin chưa có mã nhận `ADMIN_EMPLOYEE_CODE` (mặc định `ADMIN`); nhân viên lấy mã từ phần trước `@` của email cũ, kèm hậu tố nếu trùng. UUID, mật khẩu, quyền, file và phiên đăng nhập được giữ nguyên. Admin có thể sửa lại mã thực tế tại **Tài khoản → Đổi mã**. Email cũ chỉ giữ trong database để bảo toàn dữ liệu, không dùng cho xác thực hoặc hiển thị tài khoản.
+
+Backend dev dùng `node --watch` với loader TypeScript để tự khởi động lại khi sửa code. Vite chuyển `/api` tới backend ở `127.0.0.1:4000`; lỗi proxy `ECONNREFUSED` nghĩa là backend chưa nhận kết nối tại cổng này. Nếu đổi `.env`, dừng và chạy lại toàn bộ `npm run dev` để nạp cấu hình mới. Nếu PostgreSQL dùng cổng khác (ví dụ `5433`), đặt đúng cổng thực tế trong `DATABASE_URL`.
+
+Chỉ entry dev cho phép dùng thay thế `localhost` và `127.0.0.1` cùng cổng khi `BASE_URL` là HTTP loopback. Production vẫn yêu cầu đúng `BASE_URL`; kiểm tra CSRF luôn giữ nguyên.
+
+Nếu dev không khởi động, terminal sẽ ghi bước thất bại, tên biến cấu hình hoặc mã lỗi gốc và cách sửa. Ví dụ `SESSION_SECRET: vẫn là giá trị mẫu` nghĩa là phải thay giá trị `replace-...` trong `.env`; `ECONNREFUSED` ở bước PostgreSQL nghĩa là database chưa nhận kết nối tại host/cổng được báo. Tạo secret bằng:
+
+```sh
+node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
+```
+
+Chép kết quả vào `SESSION_SECRET`, đặt `ADMIN_PASSWORD` riêng ít nhất 8 ký tự, rồi chạy lại `npm run dev`. `npm start` và chạy trực tiếp cũng tự đọc `.env` trong thư mục làm việc; environment của shell/container được ưu tiên. Không cần đổi secret đã dùng thực tế chỉ để kiểm tra lỗi.
 
 ## Xem thử nhanh không cần PostgreSQL
 

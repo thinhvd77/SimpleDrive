@@ -8,7 +8,7 @@
   },
   "scripts": {
     "dev": "concurrently -k npm:dev:server npm:dev:web",
-    "dev:server": "tsx watch --env-file=.env server/main.ts",
+    "dev:server": "node --watch --env-file=.env --import tsx server/dev.ts",
     "dev:web": "vite --host 127.0.0.1",
     "build": "npm run typecheck && vite build && tsc -p tsconfig.server.json",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.server.json --noEmit",
